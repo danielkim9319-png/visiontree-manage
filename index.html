@@ -148,7 +148,7 @@ async function boot(){
   try {
     const status=await api('status');
     if(!status.user)phoneMode=status.authMode==='phone';
-    if(!status.user){login(status.setup,!phoneMode&&!status.setup&&!status.registered?'현재 이메일로 등록된 비전트리 계정이 없습니다.': '',status);return;}
+    if(!status.user){login(status.setup,!phoneMode&&!status.setup&&!status.registered?'등록된 교사 계정을 확인해 주세요.': '',status);return;}
     user=status.user;phoneMode=status.authMode==='phone';logout.hidden=false;view='홈';data=null;classes=[];storedProfiles=null;selected=defaultClass();profileScope='';week='';error='';
     applySnapshot(status);
     if(!data){
@@ -311,7 +311,7 @@ function render(){
   if(view==='셀모임일지') content='<section class="panel"><h2>일지 작성</h2><form id="report-form"><div class="formgrid">'+'<div class="bar" id="report-scope"></div><input type="hidden" name="classId">'+'<label>모임 주차<select name="date" required>'+reportWeeks().map((d,i)=>'<option value="'+d+'">'+d+(i===0?' (이번 주)':'')+'</option>').join('')+'</select></label></div><label>나눔과 특이사항<textarea name="notes" maxlength="2000"></textarea></label><label>기도제목<textarea name="prayer" maxlength="1500"></textarea></label><button class="primary">일지 저장</button><div class="msg" id="report-msg"></div></form></section><section class="panel"><h2>작성한 일지</h2><div id="reports"></div></section>';
   if(view==='통계')content='<section class="panel" id="statistics"></section>';
   if(view==='새친구')content='<section class="panel" id="newcomers"></section>';
-  if(view==='관리') content='<section class="panel" id="management-menu"></section><div id="management-extra"></div><section class="panel" data-member><h2>회원 등록·권한 배정</h2><p class="muted">사이트 접속 권한이 있는 교사의 이메일을 입력하세요. 이미 등록된 이메일은 권한과 PIN을 갱신합니다.</p><form id="staff-form"><div class="formgrid"><label>교사 이름<input name="name" maxlength="40" required></label><label>교사 이메일<input name="email" type="email" maxlength="254" required></label><label>직책<select name="role">'+Object.entries(roleNames).map(([id,name])=>'<option value="'+id+'"'+(id==='teacher'?' selected':'')+'>'+name+'</option>').join('')+'</select></label><div class="bar" id="staff-scope"></div><input type="hidden" name="classId"><label>교사 PIN<input name="pin" type="password" inputmode="numeric" pattern="[0-9]{8,12}" required></label></div><button type="submit" class="primary">교사 저장</button> <button type="button" id="staff-cancel" class="quiet" hidden>수정 취소</button><div class="msg" id="staff-msg"></div></form></section><section class="panel" data-member><div class="section-head"><h2>등록 회원</h2><label>직책<select id="staff-role-filter"></select></label></div><div id="staff-pin-editor"></div><div id="staff"></div></section>';
+  if(view==='관리') content='<section class="panel" id="management-menu"></section><div id="management-extra"></div><section class="panel" data-member><h2>회원 등록·권한 배정</h2><p class="muted">교사의 이름과 PIN을 입력하고 직책과 담당 범위를 선택하세요.</p><form id="staff-form"><div class="formgrid"><label>교사 이름<input name="name" maxlength="40" required></label><input name="accountId" type="hidden"><label>직책<select name="role">'+Object.entries(roleNames).map(([id,name])=>'<option value="'+id+'"'+(id==='teacher'?' selected':'')+'>'+name+'</option>').join('')+'</select></label><div class="bar" id="staff-scope"></div><input type="hidden" name="classId"><label>교사 PIN<input name="pin" type="password" inputmode="numeric" pattern="[0-9]{8,12}" required></label></div><button type="submit" class="primary">교사 저장</button> <button type="button" id="staff-cancel" class="quiet" hidden>수정 취소</button><div class="msg" id="staff-msg"></div></form></section><section class="panel" data-member><div class="section-head"><h2>등록 회원</h2><label>직책<select id="staff-role-filter"></select></label></div><div id="staff-pin-editor"></div><div id="staff"></div></section>';
   const scope=[roleNames[user.role],user.role==='admin'?'전체 마을':user.role==='worship'?user.classId:label(user.classId)].filter(Boolean).join(' · ');
   const heading=view==='홈'
     ?'<section class="hero"><span class="overline">'+safe(scope)+'</span><h1>'+safe(user.name+(user.role==='admin'?' 사역자님':' 선생님')+' 안녕하세요 :) 함께 해서 행복합니다 ♥︎')+'</h1></section>'
@@ -339,17 +339,7 @@ function render(){
   if(statsBox)renderStats(statsBox);
   if(w)w.onchange=()=>{week=w.value;render();};
   if(view==='출석'&&activeClass&&activeWeek&&data?.connected) renderAttendance(activeClass,activeWeek);
-  if(view==='관리'){
-    if(phoneMode){
-      const staffForm=document.querySelector('#staff-form');
-      const field=staffForm.elements.email;
-      field.type='tel';field.maxLength=15;
-      field.closest('label').firstChild.textContent='교사 휴대전화 번호';
-      staffForm.elements.pin.pattern='[0-9]{10,12}';
-      staffForm.previousElementSibling.textContent='교사의 휴대전화 번호와 담당 범위를 등록하세요. PIN은 별도로 전달해 주세요.';
-    }
-    renderManagement();
-  }
+  if(view==='관리')renderManagement();
   if(view==='셀모임일지') configure('report',results=>results.length?results.map((r,i)=>
     '<article class="report" data-report="'+i+'"><strong>'+safe(r.date)+' · '+safe(label(r.class_id))+'</strong><span class="muted"> · '+safe(r.author)+'</span><p>'+safe(r.notes)+'</p>'+
     (r.prayer?'<p><b>기도제목</b> '+safe(r.prayer)+'</p>':'')+
@@ -454,16 +444,16 @@ function configure(kind,build){
   function memberEdit(record){
     editingMember=Boolean(record);
     const fields=form.elements;
-    fields.email.readOnly=fields.name.readOnly=editingMember;
+    fields.name.readOnly=editingMember;
     fields.pin.required=!editingMember;
     fields.pin.closest('label').hidden=editingMember;
     form.querySelector('button[type=submit]').textContent=editingMember?'권한 수정 저장':'교사 저장';
     form.querySelector('#staff-cancel').hidden=!editingMember;
     if(record){
-      fields.email.value=record.email;fields.name.value=record.name;fields.role.value=record.role;fields.pin.value='';
+      fields.accountId.value=record.accountId||record.name;fields.name.value=record.name;fields.role.value=record.role;fields.pin.value='';
       setStaffScope(record.class_id||'');
       fields.role.focus();
-    }else{form.reset();setStaffScope();}
+    }else{form.reset();fields.accountId.value='';setStaffScope();}
   }
   async function refresh(){
     box.textContent='불러오는 중입니다.';
@@ -522,7 +512,7 @@ function configure(kind,build){
               event.preventDefault();
               const save=event.submitter;save.disabled=true;
               try{
-                const result=await api('staff',{action:'reset-pin',email:teacher.email,pin:pinForm.elements.pin.value});
+                const result=await api('staff',{action:'reset-pin',accountId:teacher.accountId||teacher.name,pin:pinForm.elements.pin.value});
                 if(result.relogin){await boot();return;}
                 editor.textContent='PIN을 초기화했습니다. 새 PIN으로 로그인할 수 있습니다.';
               }catch(e){message(pinForm.querySelector('.msg'),e.message);}
@@ -541,8 +531,8 @@ function configure(kind,build){
           if(!window.confirm(teacher.name+' 교사 계정을 삭제할까요? 로그인 권한이 즉시 해제됩니다.'))return;
           button.disabled=true;
           try{
-            await api('staff/remove',{email:teacher.email});
-            if(form.elements.email.value.trim().toLowerCase()===teacher.email)memberEdit(null);
+            await api('staff/remove',{accountId:teacher.accountId||teacher.name});
+            if(form.elements.accountId.value===(teacher.accountId||teacher.name))memberEdit(null);
             message(msg,'교사 계정을 삭제했습니다.',true);
             await refresh();
           }catch(e){message(msg,e.message);}
@@ -1053,8 +1043,8 @@ function renderManagement(){
   }
   const filter=document.querySelector('#staff-role-filter');
   filter.innerHTML=statOptions([['','전체'],...Object.entries(roleNames)],'');
-  configure('staff',records=>table(['이름',phoneMode?'휴대전화 번호':'이메일','직책','담당 범위','관리'],records.map(r=>[
-    r.name,r.email,roleNames[r.role],r.role==='admin'?'전체 마을':r.role==='worship'?r.class_id:label(r.class_id),'',
+  configure('staff',records=>table(['이름','직책','담당 범위','관리'],records.map(r=>[
+    r.name,roleNames[r.role],r.role==='admin'?'전체 마을':r.role==='worship'?r.class_id:label(r.class_id),'',
   ])));
   choose(managementPage);
 }
