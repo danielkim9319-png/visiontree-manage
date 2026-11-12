@@ -164,9 +164,9 @@ document.querySelector('#brand-home').onclick=()=>{if(user){view='홈';render();
 const roleNames={admin:'사역자',executive:'임원',village:'마을장',group:'조장',teacher:'반교사',newcomer:'새친구',worship:'예배팀'};
 const worshipTeams=['방송','위더스','SNS/테마/친사','비스킷','헬퍼'];
 const staffDepth={village:1,group:2,teacher:3};
-const availableClasses=()=>keys.filter(x=>user.role==='admin'||(staffDepth[user.role]&&(x===user.classId||x.startsWith(user.classId+'/'))));
+const availableClasses=()=>keys.filter(x=>statRoles.includes(user.role)||(staffDepth[user.role]&&(x===user.classId||x.startsWith(user.classId+'/'))));
 const lockedClassDepth=()=>user.classId?(staffDepth[user.role]||0):0;
-const defaultClass=()=>user.role==='admin'?'':availableClasses()[0]||'';
+const defaultClass=()=>statRoles.includes(user.role)?'':availableClasses()[0]||'';
 function initialAttendanceClass(){
   const allowed=availableClasses();
   const loaded=classes.filter(c=>allowed.includes(c.id));
@@ -299,7 +299,7 @@ const navGlyphs={'홈':'⌂','출석':'✓','통계':'▥','셀모임일지':'�
 function render(){
   clearTimeout(attendanceTimer);
   const hasClasses=availableClasses().length>0;
-  const names=['홈',...(hasClasses?['출석']:[]),...(statRoles.includes(user.role)?['통계']:[]),...(hasClasses?['셀모임일지']:[]),...(user.role==='admin'?['학생 신상 정보']:[]),...(newcomerRoles.includes(user.role)?['새친구']:[]),...(user.role==='admin'?['관리']:[])];
+  const names=['홈',...(hasClasses?['출석']:[]),...(statRoles.includes(user.role)?['통계']:[]),...(hasClasses?['셀모임일지']:[]),...(statRoles.includes(user.role)?['학생 신상 정보']:[]),...(newcomerRoles.includes(user.role)?['새친구']:[]),...(user.role==='admin'?['관리']:[])];
   const nav=names.map(n=>'<button data-view="'+n+'"'+(view===n?' aria-current="page"':'')+'><span class="nav-glyph" aria-hidden="true">'+navGlyphs[n]+'</span>'+n+'</button>').join('');
   const status=error?'<p class="msg">'+safe(error)+'</p>':!data?'<p class="muted">출석부를 불러오는 중입니다.</p>':!data.connected?'<p class="muted">Google 출석부 연결을 기다리고 있습니다.</p>':'';
   let content='';
@@ -314,12 +314,12 @@ function render(){
       (data?.connected?(activeClass?(activeWeek?'<div id="attendance-editor">불러오는 중입니다.</div>':'<p class="muted">조회할 수 있는 출석 주차가 없습니다.</p>'):
         (classes.length?'<p class="muted">마을, 조, 반을 선택하면 해당 반 출석 명단이 표시됩니다.</p>':'<p class="muted">연결된 출석부에 조회할 반이 없습니다.</p>')):'')+'</section>';
   }
-  if(view==='학생 신상 정보'&&user.role==='admin')content='<section class="panel">'+picker()+'<div id="profiles" class="muted">불러오는 중입니다.</div></section>';
-  if(view==='셀모임일지') content='<section class="panel"><h2>일지 작성</h2><form id="report-form"><div class="formgrid">'+'<div class="bar" id="report-scope"></div><input type="hidden" name="classId">'+'<label>모임 주차<select name="date" required>'+reportWeeks().map((d,i)=>'<option value="'+d+'">'+d+(i===0?' (이번 주)':'')+'</option>').join('')+'</select></label></div><label>나눔과 특이사항<textarea name="notes" maxlength="2000"></textarea></label><label>기도제목<textarea name="prayer" maxlength="1500"></textarea></label><button class="primary">일지 저장</button><div class="msg" id="report-msg"></div></form></section><section class="panel"><h2>작성한 일지</h2><div id="reports"></div></section>';
+  if(view==='학생 신상 정보'&&statRoles.includes(user.role))content='<section class="panel">'+picker()+'<div id="profiles" class="muted">불러오는 중입니다.</div></section>';
+  if(view==='셀모임일지') content=(user.role==='executive'?'':'<section class="panel"><h2>일지 작성</h2><form id="report-form"><div class="formgrid">'+'<div class="bar" id="report-scope"></div><input type="hidden" name="classId">'+'<label>모임 주차<select name="date" required>'+reportWeeks().map((d,i)=>'<option value="'+d+'">'+d+(i===0?' (이번 주)':'')+'</option>').join('')+'</select></label></div><label>나눔과 특이사항<textarea name="notes" maxlength="2000"></textarea></label><label>기도제목<textarea name="prayer" maxlength="1500"></textarea></label><button class="primary">일지 저장</button><div class="msg" id="report-msg"></div></form></section>')+'<section class="panel"><h2>작성한 일지</h2><div id="reports"></div></section>';
   if(view==='통계')content='<section class="panel" id="statistics"></section>';
   if(view==='새친구')content='<section class="panel" id="newcomers"></section>';
   if(view==='관리') content='<section class="panel" id="management-menu"></section><div id="management-extra"></div><section class="panel" data-member><h2>회원 등록·권한 배정</h2><p class="muted">교사의 이름과 PIN을 입력하고 직책과 담당 범위를 선택하세요.</p><form id="staff-form"><div class="formgrid"><label>교사 이름<input name="name" maxlength="40" required></label><input name="accountId" type="hidden"><label>직책<select name="role">'+Object.entries(roleNames).map(([id,name])=>'<option value="'+id+'"'+(id==='teacher'?' selected':'')+'>'+name+'</option>').join('')+'</select></label><div class="bar" id="staff-scope"></div><input type="hidden" name="classId"><label>교사 PIN<input name="pin" type="password" inputmode="numeric" pattern="[0-9]{8,12}" required></label></div><button type="submit" class="primary">교사 저장</button> <button type="button" id="staff-cancel" class="quiet" hidden>수정 취소</button><div class="msg" id="staff-msg"></div></form></section><section class="panel" data-member><div class="section-head"><h2>등록 회원</h2><label>직책<select id="staff-role-filter"></select></label></div><div id="staff-pin-editor"></div><div id="staff"></div></section>';
-  const scope=[roleNames[user.role],user.role==='admin'?'전체 마을':user.role==='worship'?user.classId:label(user.classId)].filter(Boolean).join(' · ');
+  const scope=[roleNames[user.role],statRoles.includes(user.role)?'전체 마을':user.role==='worship'?user.classId:label(user.classId)].filter(Boolean).join(' · ');
   const heading=view==='홈'
     ?'<section class="hero"><span class="overline">'+safe(scope)+'</span><h1>'+safe(user.name+(user.role==='admin'?' 사역자님':' 선생님')+' 안녕하세요 :) 함께 해서 행복합니다 ♥︎')+'</h1></section>'
     :'<div class="page-title"><h1>'+safe(view)+'</h1><span class="pill">'+safe(scope)+'</span></div>';
@@ -332,7 +332,7 @@ function render(){
   if(currentMenu&&currentMenu.offsetLeft+currentMenu.offsetWidth>menu.clientWidth)menu.scrollLeft=currentMenu.offsetLeft;
   app.querySelectorAll('[data-view]').forEach(b=>b.onclick=()=>{
     view=b.dataset.view;
-    if(view==='출석'&&user.role==='admin'&&!classes.some(c=>c.id===selected))selected=initialAttendanceClass();
+    if(view==='출석'&&statRoles.includes(user.role)&&!classes.some(c=>c.id===selected))selected=initialAttendanceClass();
     render();
   });
   const cls=document.querySelector('#class-filter'),w=document.querySelector('#week');
@@ -352,10 +352,10 @@ function render(){
   if(view==='셀모임일지') configure('report',results=>results.length?results.map((r,i)=>
     '<article class="report" data-report="'+i+'"><strong>'+safe(r.date)+' · '+safe(label(r.class_id))+'</strong><span class="muted"> · '+safe(r.author)+'</span><p>'+safe(r.notes)+'</p>'+
     (r.prayer?'<p><b>기도제목</b> '+safe(r.prayer)+'</p>':'')+
-    '<div class="bar"><button type="button" class="quiet" data-toggle="edit">일지 수정</button><button type="button" class="quiet" data-remove="report">일지 삭제</button></div>'+
+    (user.role==='executive'?'':'<div class="bar"><button type="button" class="quiet" data-toggle="edit">일지 수정</button><button type="button" class="quiet" data-remove="report">일지 삭제</button></div>'+
     '<form data-edit hidden><label>나눔과 특이사항<textarea name="notes" maxlength="2000">'+safe(r.notes)+'</textarea></label>'+
     '<label>기도제목<textarea name="prayer" maxlength="1500">'+safe(r.prayer)+'</textarea></label><button class="primary">수정 저장</button> '+
-    '<button type="button" class="quiet" data-toggle="edit">취소</button></form>'+
+    '<button type="button" class="quiet" data-toggle="edit">취소</button></form>')+
     (r.reply?'<p><b>사역자 답글 · '+safe(r.reply_author)+'</b><br>'+safe(r.reply)+'</p>':'')+
     (user.role==='admin'?(r.reply?'<div class="bar"><button type="button" class="quiet" data-toggle="reply">답글 수정</button><button type="button" class="quiet" data-remove="reply">답글 삭제</button></div>':'')+
     '<form data-reply'+(r.reply?' hidden':'')+'><label>사역자 답글<textarea name="reply" maxlength="1500" required>'+safe(r.reply||'')+'</textarea></label><button class="primary">'+
@@ -472,6 +472,7 @@ function configure(kind,build){
       const records=role?allRecords.filter(row=>row.role===role):allRecords;
       if(!box.isConnected)return;
       box.innerHTML=build(records);
+      if(!form)return;
       if(!staff) box.querySelectorAll('[data-report]').forEach(article=>{
         const {class_id:classId,date}=records[Number(article.dataset.report)];
         const edit=article.querySelector('[data-edit]'), reply=article.querySelector('[data-reply]');
@@ -568,6 +569,7 @@ function configure(kind,build){
       form.elements.classId.value=scope.split('/').length===depth?scope:'';
     });
   }
+  if(!form){refresh();return;}
   if(staff){form.elements.role.onchange=()=>setStaffScope();setStaffScope();form.querySelector('#staff-cancel').onclick=()=>{memberEdit(null);message(msg,'');};document.querySelector('#staff-role-filter').onchange=refresh;}
   else{
     const initial=selected||user.classId||'';
