@@ -67,7 +67,7 @@ async function api(path,payload){
   url.searchParams.set('path',path);
   const token=sessionToken();
   if(token)url.searchParams.set('token',token);
-  const options=payload?{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify(payload)}:{};
+  const options={method:'POST',redirect:'follow',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify(payload===undefined?null:payload)};
   let res;
   try{res=await fetch(url,options);}
   catch{throw Error('웹 앱에 연결하지 못했습니다.');}
