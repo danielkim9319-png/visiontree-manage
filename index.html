@@ -97,7 +97,7 @@ function login(setup=false,initial='',account=null){
   if(account?.email){
     const hint=document.createElement('p');
     hint.className='muted';
-    hint.textContent='현재 ChatGPT 계정 · '+account.email+' ';
+    hint.textContent='현재 계정 · '+account.email+' ';
     const switchAccount=document.createElement('a');
     switchAccount.href='/signout-with-chatgpt?return_to=%2F';
     switchAccount.target='_top';
