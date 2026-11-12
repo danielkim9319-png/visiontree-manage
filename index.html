@@ -54,7 +54,7 @@ let phoneMode=false;
 let user,view='홈',data,classes=[],selected='',profileScope='',week='',error='';
 const keys=[['11',6],['12',6],['21',5],['22',6],['31',5],['32',5]].flatMap(([g,n])=>Array.from({length:n},(_,i)=>g[0]+'마을/'+g+'조/'+(i+1)+'반'));
 // 구글 시트 데이터를 불러오는 Apps Script 웹 앱 주소 (배포를 새로 만들면 이 주소만 바꾸세요)
-const API='https://script.google.com/macros/s/AKfycbwe1GNUmbAMdUdCIwnmSpJJsWwRApWLH9xQQm2RB_Omxe4-5mPUupCTlDg4xuyVBK1lUg/exec';
+const API='https://script.google.com/macros/s/AKfycbzajKmg763YcAv-xLSpkMyDzJIZDiViGksuKu5ONE_zTvOfIKv_9Wd40RNgA7ud2yJpIA/exec';
 function sessionToken(next){
   try{
     if(next===null)sessionStorage.removeItem('visiontree-session');
