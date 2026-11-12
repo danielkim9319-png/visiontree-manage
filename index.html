@@ -64,10 +64,12 @@ function sessionToken(next){
     return sessionStorage.getItem('visiontree-session')||'';
   }catch{return '';}
 }
+let readGeneration=0;
 async function api(path,payload,fresh){
   const reading=payload===undefined;
-  if(!reading)readCache.clear();
+  if(!reading){readGeneration++;readCache.clear();inflight.clear();}
   if(reading&&inflight.has(path))return inflight.get(path);
+  const generation=readGeneration;
   if(reading&&!fresh){
     const hit=readCache.get(path);
     if(hit&&Date.now()-hit.at<60000)return hit.body;
@@ -85,10 +87,15 @@ async function api(path,payload,fresh){
     if(!res.ok||body.error)throw Error(body.error||'요청을 처리하지 못했습니다.');
     if(body.token)sessionToken(body.token);
     if(path==='logout')sessionToken(null);
-    if(reading)rememberRead(path,body);
+    if(!reading){readGeneration++;readCache.clear();inflight.clear();}
+    else if(generation===readGeneration)rememberRead(path,body);
     return body;
   })();
-  if(reading){inflight.set(path,run);run.finally(()=>inflight.delete(path));}
+  if(reading){
+    inflight.set(path,run);
+    const cleanup=()=>{if(inflight.get(path)===run)inflight.delete(path);};
+    run.then(cleanup,cleanup);
+  }
   return run;
 }
 function applySnapshot(status){
@@ -334,6 +341,7 @@ function render(){
     view=b.dataset.view;
     if(view==='출석'&&statRoles.includes(user.role)&&!classes.some(c=>c.id===selected))selected=initialAttendanceClass();
     render();
+    refreshVisibleRoster();
   });
   const cls=document.querySelector('#class-filter'),w=document.querySelector('#week');
   if(cls){
@@ -364,27 +372,41 @@ function render(){
   ).join(''):'<p class="muted">작성된 일지가 없습니다.</p>');
 }
 let attendanceTimer, rosterRefreshing=false;
+const liveRosterViews=new Set(['홈','출석','통계','학생 신상 정보']);
 async function refreshVisibleRoster(){
-  if(!user||rosterRefreshing||document.hidden||!['홈','출석'].includes(view))return;
-  const sessionUser=user;
+  if(!user||rosterRefreshing||document.hidden||!liveRosterViews.has(view))return;
+  const sessionUser=user, page=view;
+  const editing=()=>page==='출석'&&(document.querySelector('#attendance-editor [data-dirty=true]')||document.activeElement?.matches('select'));
+  if(editing())return;
   rosterRefreshing=true;
   try{
     const updated=await api('roster',undefined,true);
-    if(user!==sessionUser||!['홈','출석'].includes(view))return;
-    if(updated.syncedAt&&data?.syncedAt===updated.syncedAt)return;
-    const changed=updated.syncedAt?true:JSON.stringify(classes)!==JSON.stringify(updated.classes)||error||!data;
-    if(view==='출석'&&document.querySelector('#attendance-editor [data-dirty=true]'))return;
-    data=updated;classes=updated.classes;error='';
-    if(view==='홈'){
+    if(user!==sessionUser||view!==page||editing())return;
+    const changed=JSON.stringify(classes)!==JSON.stringify(updated.classes)||error||!data;
+    const newWeek=page==='출석'&&document.querySelector('#week option')?.value!==attendanceDates(updated.classes)[0];
+    if(page==='홈'){
       const home=document.querySelector('#home-attendance');
-      if(home&&!home.contains(document.activeElement))renderHomeAttendance(home);
-    }else if(changed||document.querySelector('#week option')?.value!==attendanceDates(classes)[0]){
-      if(!document.activeElement?.matches('select'))render();
+      if(home?.contains(document.activeElement))return;
     }
+    data=updated;classes=updated.classes;error='';
+    if(page==='홈'){
+      const home=document.querySelector('#home-attendance');
+      if(home)renderHomeAttendance(home);
+    }else if(page==='학생 신상 정보'){
+      const panel=document.querySelector('#profiles');
+      const profiles=await api('student-profiles',undefined,true);
+      if(user!==sessionUser||view!==page||!panel?.isConnected)return;
+      storedProfiles=profiles.profiles;
+      renderProfiles(panel);
+    }else if(page==='통계'){
+      const panel=document.querySelector('#statistics');
+      if(panel&&!panel.contains(document.activeElement))renderStats(panel);
+    }else if(changed||newWeek)render();
   }catch{}finally{rosterRefreshing=false;}
 }
-setInterval(refreshVisibleRoster,120000);
+setInterval(refreshVisibleRoster,30000);
 window.addEventListener('focus',refreshVisibleRoster);
+document.addEventListener('visibilitychange',()=>{if(!document.hidden)refreshVisibleRoster();});
 function renderAttendance(c,date){
   const box=document.querySelector('#attendance-editor');
   if(!box)return;
