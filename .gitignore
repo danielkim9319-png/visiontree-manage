@@ -1,0 +1,20 @@
+/dist/
+/.env
+/.env.*
+!/.env.example
+
+/wrangler.generated.json
+/.dev.vars*
+
+# 서버, 데이터베이스, 스프레드시트 스크립트는 GitHub에 올리지 않습니다.
+/worker/
+/apps-script/
+/web/
+/drizzle/
+/scripts/
+/test/
+/.openai/
+/.github/
+/package.json
+/README.md
+/DEPLOYMENT.md

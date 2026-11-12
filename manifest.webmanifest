@@ -1,0 +1,14 @@
+{
+  "name": "비전트리 목양 관리 시스템",
+  "short_name": "비전트리",
+  "description": "안산동산교회 본당고등부 교사 목양 관리",
+  "lang": "ko",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f3f5ee",
+  "theme_color": "#285843",
+  "icons": [
+    { "src": "visiontree-logo.png", "sizes": "1936x767", "type": "image/png", "purpose": "any" }
+  ]
+}
