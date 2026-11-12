@@ -47,7 +47,9 @@ header{height:64px;padding-inline:max(22px,calc((100vw - 1060px)/2));background:
 <script>
 const app=document.querySelector('#app'),logout=document.querySelector('#logout');
 const safe=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-let classTeachers={};
+let classTeachers={},storedProfiles=null;
+const readCache=new Map(),inflight=new Map();
+function rememberRead(path,body){readCache.set(path,{at:Date.now(),body});}
 const roomLabel=(room,id)=>classTeachers[id]?room+'('+classTeachers[id]+')':room;
 const label=id=>{const parts=(id||'').split('/');if(parts.length===3)parts[2]=roomLabel(parts[2],id);return parts.join(' · ');};
 let phoneMode=false;
@@ -62,20 +64,45 @@ function sessionToken(next){
     return sessionStorage.getItem('visiontree-session')||'';
   }catch{return '';}
 }
-async function api(path,payload){
-  const url=new URL(API);
-  url.searchParams.set('path',path);
-  const token=sessionToken();
-  if(token)url.searchParams.set('token',token);
-  const options={method:'POST',redirect:'follow',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify(payload===undefined?null:payload)};
-  let res;
-  try{res=await fetch(url,options);}
-  catch{throw Error('웹 앱에 연결하지 못했습니다.');}
-  const body=await res.json().catch(()=>({error:'응답을 확인하지 못했습니다.'}));
-  if(!res.ok||body.error)throw Error(body.error||'요청을 처리하지 못했습니다.');
-  if(body.token)sessionToken(body.token);
-  if(path==='logout')sessionToken(null);
-  return body;
+async function api(path,payload,fresh){
+  const reading=payload===undefined;
+  if(!reading)readCache.clear();
+  if(reading&&inflight.has(path))return inflight.get(path);
+  if(reading&&!fresh){
+    const hit=readCache.get(path);
+    if(hit&&Date.now()-hit.at<60000)return hit.body;
+  }
+  const run=(async()=>{
+    const url=new URL(API);
+    url.searchParams.set('path',path);
+    const token=sessionToken();
+    if(token)url.searchParams.set('token',token);
+    const options={method:'POST',redirect:'follow',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify(payload===undefined?null:payload)};
+    let res;
+    try{res=await fetch(url,options);}
+    catch{throw Error('웹 앱에 연결하지 못했습니다.');}
+    const body=await res.json().catch(()=>({error:'응답을 확인하지 못했습니다.'}));
+    if(!res.ok||body.error)throw Error(body.error||'요청을 처리하지 못했습니다.');
+    if(body.token)sessionToken(body.token);
+    if(path==='logout')sessionToken(null);
+    if(reading)rememberRead(path,body);
+    return body;
+  })();
+  if(reading){inflight.set(path,run);run.finally(()=>inflight.delete(path));}
+  return run;
+}
+function applySnapshot(status){
+  classTeachers=status.teachers||classTeachers;
+  if(Array.isArray(status.classes)){
+    data={connected:true,classes:status.classes,syncedAt:status.syncedAt||''};
+    classes=status.classes;
+    rememberRead('roster',data);
+  }
+  if(Array.isArray(status.profiles)){
+    storedProfiles=status.profiles;
+    rememberRead('student-profiles',{syncedAt:status.syncedAt||'',profiles:status.profiles});
+  }
+  if(Array.isArray(status.newcomers))rememberRead('newcomers?year='+newcomerToday().slice(0,4),{rows:status.newcomers});
 }
 function message(el,value,ok=false){el.textContent=value;el.classList.toggle('ok',ok);}
 function login(setup=false,initial='',account=null){
@@ -122,9 +149,13 @@ async function boot(){
     const status=await api('status');
     if(!status.user)phoneMode=status.authMode==='phone';
     if(!status.user){login(status.setup,!phoneMode&&!status.setup&&!status.registered?'현재 이메일로 등록된 비전트리 계정이 없습니다.': '',status);return;}
-    user=status.user;phoneMode=status.authMode==='phone';classTeachers=status.teachers||{};logout.hidden=false;view='홈';data=null;classes=[];selected=defaultClass();profileScope='';week='';error='';render();
-    try {data=await api('roster');classes=data.classes;}
-    catch(e){error=e.message;}
+    user=status.user;phoneMode=status.authMode==='phone';logout.hidden=false;view='홈';data=null;classes=[];storedProfiles=null;selected=defaultClass();profileScope='';week='';error='';
+    applySnapshot(status);
+    if(!data){
+      render();
+      try{data=await api('roster');classes=data.classes;error='';}
+      catch(e){error=e.message;}
+    }
     render();
   } catch(e){login(false,e.message);}
 }
@@ -187,7 +218,11 @@ function reportWeeks(){
 }
 async function renderProfiles(box){
   try{
-    const {syncedAt,profiles}=await api('student-profiles');
+    let syncedAt=data?.syncedAt||'',profiles=storedProfiles;
+    if(!profiles){
+      const loaded=await api('student-profiles');
+      syncedAt=loaded.syncedAt;profiles=loaded.profiles;storedProfiles=profiles;
+    }
     if(!box.isConnected)return;
     if(!syncedAt){box.textContent='학생 신상 정보 동기화를 기다리고 있습니다.';return;}
     const rows=profiles.filter(p=>!profileScope||p.classId===profileScope||p.classId.startsWith(profileScope+'/'));
@@ -290,7 +325,6 @@ function render(){
   if(currentMenu&&currentMenu.offsetLeft+currentMenu.offsetWidth>menu.clientWidth)menu.scrollLeft=currentMenu.offsetLeft;
   app.querySelectorAll('[data-view]').forEach(b=>b.onclick=()=>{
     view=b.dataset.view;render();
-    if(['홈','출석'].includes(view))refreshVisibleRoster();
   });
   const cls=document.querySelector('#class-filter'),w=document.querySelector('#week');
   if(cls){
@@ -336,9 +370,10 @@ async function refreshVisibleRoster(){
   const sessionUser=user;
   rosterRefreshing=true;
   try{
-    const updated=await api('roster');
+    const updated=await api('roster',undefined,true);
     if(user!==sessionUser||!['홈','출석'].includes(view))return;
-    const changed=JSON.stringify(classes)!==JSON.stringify(updated.classes)||error||!data;
+    if(updated.syncedAt&&data?.syncedAt===updated.syncedAt)return;
+    const changed=updated.syncedAt?true:JSON.stringify(classes)!==JSON.stringify(updated.classes)||error||!data;
     if(view==='출석'&&document.querySelector('#attendance-editor [data-dirty=true]'))return;
     data=updated;classes=updated.classes;error='';
     if(view==='홈'){
@@ -349,42 +384,24 @@ async function refreshVisibleRoster(){
     }
   }catch{}finally{rosterRefreshing=false;}
 }
-setInterval(refreshVisibleRoster,30000);
+setInterval(refreshVisibleRoster,120000);
 window.addEventListener('focus',refreshVisibleRoster);
-async function renderAttendance(c,date){
+function renderAttendance(c,date){
   const box=document.querySelector('#attendance-editor');
+  if(!box)return;
   try{
-    const info=await api('attendance');
-    if(!box.isConnected)return;
-    const pending=info.jobs.find(j=>j.class_id===c.id&&j.date===date);
     const index=c.dates.indexOf(date);
     if(index<0){box.textContent='이 반의 해당 주차 기록이 없습니다.';return;}
     const [month,day]=date.match(/\d+/g);
     const dayKey='2026-'+month.padStart(2,'0')+'-'+day.padStart(2,'0');
     const students=c.students.filter(s=>!s.registered||s.registered<=dayKey);
     const special=c.students.some(s=>s.attendance[index]==='모두예배');
-    const canEdit=info.ready&&!special&&pending?.state!=='pending';
-    const failure={class:'반 정보 변경',date:'날짜 변경',student:'학생을 한 명으로 확인할 수 없음',conflict:'시트 출결이 변경됨',formula:'수식이 있는 셀',special:'모두예배 주차'};
-    let note=special?'모두예배 주차입니다.':pending?.state==='pending'?'저장 요청을 받았습니다. 스프레드시트 반영 중입니다.':
-      !info.ready?'출석부 자동 반영이 아직 연결되지 않았습니다.':pending?.state==='failed'?'반영되지 않았습니다. '+(failure[pending.reason]||'출석부를 확인해 주세요.'):
-      pending?.state==='applied'?'스프레드시트에 반영됐습니다.':'변경한 학생만 저장합니다.';
+    const canEdit=!special;
+    const note=special?'모두예배 주차입니다.':'변경한 학생만 저장합니다.';
     box.innerHTML=table(['이름','현재 출결',...(canEdit?['입력']:[])],students.map(s=>[
       s.name,markLabels[s.attendance[index]]||'미입력',...(canEdit?['']:[])
     ]))+'<p class="muted" role="status" id="attendance-note">'+safe(note)+'</p>'+
       (canEdit?'<button class="primary" id="attendance-save" disabled>출결 저장</button>':'');
-    if(pending?.state==='pending'){
-      attendanceTimer=setTimeout(async()=>{
-        if(!box.isConnected)return;
-        try{
-          const next=await api('attendance');
-          if(!box.isConnected)return;
-          if(next.jobs.find(j=>j.class_id===c.id&&j.date===date)?.state==='pending')return renderAttendance(c,date);
-          const roster=await api('roster');
-          if(!box.isConnected)return;
-          data=roster;classes=data.classes;render();
-        }catch(e){if(box.isConnected)box.textContent=e.message;}
-      },3000);
-    }
     if(!canEdit)return;
     const changes=new Map(), save=box.querySelector('#attendance-save'), msg=box.querySelector('#attendance-note');
     box.querySelectorAll('tbody tr').forEach((row,i)=>{
@@ -411,9 +428,15 @@ async function renderAttendance(c,date){
       save.disabled=true;
       box.querySelectorAll('.attendance-mark').forEach(b=>b.disabled=true);
       try{
-        await api('attendance',{classId:c.id,date,changes:[...changes.values()]});
-        const updated=await api('roster');
-        data=updated;classes=updated.classes;error='';
+        const saved=await api('attendance',{classId:c.id,date,changes:[...changes.values()]});
+        if(Array.isArray(saved.classes)){
+          data={connected:true,classes:saved.classes,syncedAt:saved.syncedAt||''};
+          classes=saved.classes;rememberRead('roster',data);
+        }else{
+          const updated=await api('roster',undefined,true);
+          data=updated;classes=updated.classes;
+        }
+        error='';
         if(box.isConnected)render();
       }catch(e){
         if(!box.isConnected)return;
@@ -777,6 +800,113 @@ const statFilters={attendance:{},absence:{},trend:{length:'8'},school:{},area:{}
 const statOptions=(values,current)=>values.map(([value,label])=>'<option value="'+safe(value)+'"'+(value===current?' selected':'')+'>'+safe(label)+'</option>').join('');
 const statSelect=(title,id,values,current)=>'<label>'+title+'<select data-stat-filter="'+id+'">'+statOptions(values,current)+'</select></label>';
 const statVillages=[['','전체'],['1마을','1마을'],['2마을','2마을'],['3마을','3마을']];
+const statPresent=mark=>['출','지','온라인'].includes(mark);
+const statAbsent=mark=>['결','무'].includes(mark);
+const statComparable=mark=>statPresent(mark)||statAbsent(mark);
+function statIso(label){
+  const parts=String(label||'').match(/^(\d{1,2})월 (\d{1,2})일$/);
+  if(!parts)return '';
+  const iso='2026-'+parts[1].padStart(2,'0')+'-'+parts[2].padStart(2,'0');
+  const day=new Date(iso+'T00:00:00Z');
+  return Number.isNaN(day.getTime())||day.toISOString().slice(0,10)!==iso?'':iso;
+}
+function statShift(date,months,days=0){
+  const [year,month,day]=date.split('-').map(Number);
+  const start=new Date(Date.UTC(year,month-1+months,1));
+  const last=new Date(Date.UTC(start.getUTCFullYear(),start.getUTCMonth()+1,0)).getUTCDate();
+  start.setUTCDate(Math.min(day,last)+days);
+  return start.toISOString().slice(0,10);
+}
+function statArea(raw){
+  const tokens=String(raw||'').trim().split(/[\s,()]+/).filter(token=>/^[가-힣0-9·]+[동읍면]$/.test(token));
+  return tokens.at(-1)||'';
+}
+function localStatistics(mode,filter){
+  const today=newcomerToday();
+  const village=filter.village||'';
+  const scoped=classes.filter(item=>!village||item.id.startsWith(village+'/'));
+  const seen=new Set(),dates=[];
+  const roster=[];
+  for(const item of scoped){
+    const isoDates=item.dates.map(statIso);
+    for(const date of isoDates)if(date&&date<=today&&!seen.has(date)){seen.add(date);dates.push(date);}
+    for(const student of item.students)roster.push({name:student.name,classId:item.id,marks:student.attendance,dates:isoDates});
+  }
+  dates.sort();
+  if(mode==='attendance'){
+    const classId=filter.classId||'';
+    const date=dates.includes(filter.date)?filter.date:dates.at(-1)||'';
+    const rows=date?roster.filter(row=>!classId||row.classId===classId||row.classId.startsWith(classId+'/')).map(row=>{
+      const markIndex=row.dates.indexOf(date);
+      return {name:row.name,classId:row.classId,mark:markIndex<0?'':row.marks[markIndex]||''};
+    }):[];
+    return {dates,classes:scoped.map(item=>item.id),date,rows};
+  }
+  if(mode==='trend'){
+    const length=[8,12,26,52].includes(Number(filter.length))?Number(filter.length):8;
+    const sunday=statShift(today,0,-new Date(today+'T00:00:00Z').getUTCDay());
+    const villages=village?[village]:['1마을','2마을','3마을'];
+    const series=[];
+    for(let i=0;i<length;i++){
+      const date=statShift(sunday,0,-7*(length-1-i));
+      const counts={};
+      for(const key of villages){
+        const marks=roster.filter(row=>row.classId.startsWith(key+'/')).map(row=>{
+          const markIndex=row.dates.indexOf(date);
+          return markIndex<0?'':row.marks[markIndex]||'';
+        });
+        counts[key]=marks.some(statComparable)?marks.filter(statPresent).length:null;
+      }
+      const values=villages.map(key=>counts[key]).filter(value=>value!==null);
+      series.push({date,counts,total:values.length?values.reduce((sum,value)=>sum+value,0):null});
+    }
+    const averages={};
+    for(const key of [...villages,'전체']){
+      const values=series.map(row=>key==='전체'?row.total:row.counts[key]).filter(value=>value!==null);
+      averages[key]=values.length?values.reduce((sum,value)=>sum+value,0)/values.length:null;
+    }
+    return {series,averages,villages};
+  }
+  const profileMap=new Map();
+  for(const profile of storedProfiles||[]){
+    const key=profile.classId+'\n'+profile.name;
+    profileMap.set(key,profileMap.has(key)?null:profile);
+  }
+  const rows=roster.map(row=>{
+    const profile=profileMap.get(row.classId+'\n'+row.name);
+    const item={name:row.name,classId:row.classId,school:profile?.school||'',area:profile?statArea(profile.area):'',birth:profile?.birth||'',phone:profile?.phone||'',guardianPhone:profile?.guardianPhone||''};
+    if(mode!=='absence')return item;
+    const history=[];
+    row.dates.forEach((date,markIndex)=>{if(date&&date<=today)history.push({date,mark:row.marks[markIndex]||''});});
+    history.sort((a,b)=>a.date<b.date?-1:1);
+    const comparable=history.filter(entry=>statComparable(entry.mark));
+    const last=comparable.length?comparable.at(-1).mark:'';
+    if(!statAbsent(last))return {...item,band:''};
+    let lastPresent='',firstAbsent='';
+    for(const entry of history){
+      if(statPresent(entry.mark))lastPresent=entry.date;
+      if(!firstAbsent&&statAbsent(entry.mark))firstAbsent=entry.date;
+    }
+    const start=lastPresent||firstAbsent;
+    let band='';
+    if(start&&start<=statShift(today,0,-28))band=start<=statShift(today,-24)?'24+':start<=statShift(today,-12)?'12-24':start<=statShift(today,-6)?'6-12':'4-6';
+    return {...item,band,lastPresent,firstAbsent};
+  });
+  const choice=filter.choice||'';
+  const keyword=String(filter.q||'').trim().toLowerCase().slice(0,100);
+  const eligible=rows.filter(row=>!keyword||row.name.toLowerCase().includes(keyword)||String(row.school||'').toLowerCase().includes(keyword));
+  const options=mode==='school'||mode==='area'?[...new Set(eligible.map(row=>row[mode]).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'ko')):[];
+  const filtered=eligible.filter(row=>{
+    if(mode==='absence')return row.band&&(!choice||row.band===choice);
+    if(mode==='birthday')return choice&&String(row.birth||'').startsWith(String(choice).padStart(2,'0')+'-');
+    if(mode==='school'&&!choice)return true;
+    return choice&&row[mode]===choice;
+  });
+  if(mode==='birthday')filtered.sort((a,b)=>String(a.birth).localeCompare(String(b.birth))||a.name.localeCompare(b.name,'ko'));
+  const counts=mode==='absence'?{'4-6':0,'6-12':0,'12-24':0,'24+':0}:undefined;
+  if(counts)for(const row of eligible)if(counts[row.band]!==undefined)counts[row.band]+=1;
+  return {rows:filtered,options,counts};
+}
 function renderStats(box,embedded=''){
   const mode=embedded||statPage;
   box.innerHTML=(embedded?'':'<div class="subnav" aria-label="통계 메뉴">'+Object.entries(statPages).map(([key,title])=>
@@ -813,10 +943,18 @@ function renderStats(box,embedded=''){
   let latest=0;
   async function load(){
     const request=++latest;
-    const params=new URLSearchParams({mode,...filter});
-    result.textContent='불러오는 중입니다.';
+    const needsProfiles=mode!=='attendance'&&mode!=='trend';
+    const localReady=classes.length&&(!needsProfiles||Array.isArray(storedProfiles));
+    if(!localReady)result.textContent='불러오는 중입니다.';
     try{
-      const payload=await api('statistics?'+params);
+      let payload;
+      if(classes.length&&needsProfiles&&!Array.isArray(storedProfiles)&&user.role==='admin'){
+        const loaded=await api('student-profiles');
+        if(!result.isConnected||request!==latest)return;
+        storedProfiles=loaded.profiles||[];
+      }
+      if(classes.length&&(!needsProfiles||Array.isArray(storedProfiles)))payload=localStatistics(mode,filter);
+      else payload=await api('statistics?'+new URLSearchParams({mode,...filter}));
       if(!result.isConnected||request!==latest)return;
       if(mode==='attendance'){
         controls.innerHTML='<div class="bar" id="stat-class"></div>'+statSelect('주차','date',payload.dates.toReversed().map(d=>[d,d]),payload.date);
