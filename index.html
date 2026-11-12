@@ -165,6 +165,7 @@ const roleNames={admin:'사역자',executive:'임원',village:'마을장',group:
 const worshipTeams=['방송','위더스','SNS/테마/친사','비스킷','헬퍼'];
 const staffDepth={village:1,group:2,teacher:3};
 const availableClasses=()=>keys.filter(x=>user.role==='admin'||(staffDepth[user.role]&&(x===user.classId||x.startsWith(user.classId+'/'))));
+const lockedClassDepth=()=>user.classId?(staffDepth[user.role]||0):0;
 const defaultClass=()=>user.role==='admin'?'':availableClasses()[0]||'';
 function initialAttendanceClass(){
   const allowed=availableClasses();
@@ -337,7 +338,7 @@ function render(){
   const cls=document.querySelector('#class-filter'),w=document.querySelector('#week');
   if(cls){
     if(view==='학생 신상 정보')mountClassPicker(cls,availableClasses(),profileScope,3,scope=>{profileScope=scope;renderProfiles(document.querySelector('#profiles'));},0,true);
-    else mountClassPicker(cls,availableClasses(),selected,3,scope=>{selected=scope;week='';render();},user.classId?.split('/').length||0);
+    else mountClassPicker(cls,availableClasses(),selected,3,scope=>{selected=scope;week='';render();},lockedClassDepth());
   }
   const profiles=document.querySelector('#profiles');
   if(profiles)renderProfiles(profiles);
@@ -571,7 +572,7 @@ function configure(kind,build){
   else{
     const initial=selected||user.classId||'';
     const setReportScope=scope=>{form.elements.classId.value=scope.split('/').length===3?scope:'';};
-    mountClassPicker(document.getElementById('report-scope'),availableClasses(),initial,3,setReportScope,user.classId?.split('/').length||0);
+    mountClassPicker(document.getElementById('report-scope'),availableClasses(),initial,3,setReportScope,lockedClassDepth());
     setReportScope(initial);
   }
   form.onsubmit=async e=>{
