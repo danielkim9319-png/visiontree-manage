@@ -816,10 +816,10 @@ async function renderNewcomers(box,deletedId=''){
   }catch(e){if(list.isConnected)list.textContent=e.message;}
 }
 const statRoles=['admin','executive'];
-const statPages={attendance:'출석통계',absence:'장결자',trend:'전체 출석 인원',school:'학교별 분류',area:'거주지별 분류',birthday:'생일'};
+const statPages={attendance:'출석통계',absence:'장결자',awards:'개근·정근',trend:'전체 출석 인원',school:'학교별 분류',area:'거주지별 분류',birthday:'생일'};
 const statBands={'':'전체','4-6':'4주 ~ 6개월','6-12':'6개월 ~ 1년','12-24':'1년 ~ 2년','24+':'2년 이상'};
 let statPage='attendance';
-const statFilters={attendance:{},absence:{},trend:{length:'8'},school:{},area:{},birthday:{}};
+const statFilters={attendance:{},absence:{},awards:{duration:'1',kind:'perfect'},trend:{length:'8'},school:{},area:{},birthday:{}};
 const statOptions=(values,current)=>values.map(([value,label])=>'<option value="'+safe(value)+'"'+(value===current?' selected':'')+'>'+safe(label)+'</option>').join('');
 const statSelect=(title,id,values,current)=>'<label>'+title+'<select data-stat-filter="'+id+'">'+statOptions(values,current)+'</select></label>';
 const statVillages=[['','전체'],['1마을','1마을'],['2마을','2마을'],['3마을','3마을']];
@@ -942,6 +942,16 @@ function renderStats(box,embedded=''){
   const filter=statFilters[mode], controls=box.querySelector('#stat-filters');
   const result=box.querySelector('#stat-results');
   let pending;
+  if(mode==='awards'){
+    const year=Number(newcomerToday().slice(0,4));
+    filter.year ||= String(year);
+    const yearOptions=Array.from({length:Math.max(1,year-2023)},(_,i)=>[String(year-i),(year-i)+'년']);
+    controls.insertAdjacentHTML('beforeend',statSelect('기준 연도','year',yearOptions,filter.year)+
+      statSelect('마을','village',statVillages,filter.village||'')+
+      statSelect('기간','duration',['1','2','3'].map(n=>[n,n+'년']),filter.duration)+
+      statSelect('구분','kind',[['perfect','개근'],['regular','정근']],filter.kind));
+    controls.insertAdjacentHTML('afterend','<p class="muted">선택한 연도까지 매년 개근은 결석 0회, 정근은 결석 1회입니다. 모두예배는 제외하며 미입력 기록이 있는 학생은 판정을 보류합니다.</p>');
+  }
   if(mode==='trend')controls.insertAdjacentHTML('beforeend',statSelect('기간','length',['8','12','26','52'].map(n=>[n,'최근 '+n+'주']),filter.length));
   if(['absence','area','trend'].includes(mode))controls.insertAdjacentHTML('beforeend',statSelect('마을','village',statVillages,filter.village||''));
   if(mode==='birthday'){
@@ -966,7 +976,7 @@ function renderStats(box,embedded=''){
   let latest=0;
   async function load(){
     const request=++latest;
-    const needsProfiles=mode!=='attendance'&&mode!=='trend';
+    const needsProfiles=mode!=='attendance'&&mode!=='trend'&&mode!=='awards';
     const localReady=classes.length&&(!needsProfiles||Array.isArray(storedProfiles));
     if(!localReady)result.textContent='불러오는 중입니다.';
     try{
@@ -976,10 +986,14 @@ function renderStats(box,embedded=''){
         if(!result.isConnected||request!==latest)return;
         storedProfiles=loaded.profiles||[];
       }
-      if(mode!=='absence'&&classes.length&&(!needsProfiles||Array.isArray(storedProfiles)))payload=localStatistics(mode,filter);
+      if(!['absence','awards'].includes(mode)&&classes.length&&(!needsProfiles||Array.isArray(storedProfiles)))payload=localStatistics(mode,filter);
       else payload=await api('statistics?'+new URLSearchParams({mode,...filter}));
       if(!result.isConnected||request!==latest)return;
-      if(mode==='attendance'){
+      if(mode==='awards'){
+        const note=payload.availableVillages.length?'집계 대상 '+payload.availableVillages.join(', ')+' · '+payload.through+' 기준':'선택한 기간의 출결 이력이 없습니다.';
+        result.innerHTML='<p>'+safe(note)+'</p><p><strong>'+payload.rows.length+'명</strong></p>'+
+          (payload.rows.length?table(['이름','반',...payload.years.map(y=>y+'년 결석')],payload.rows.map(r=>[r.name,label(r.classId),...r.annual.map(n=>n+'회')])):'<p>해당 학생이 없습니다.</p>');
+      }else if(mode==='attendance'){
         controls.innerHTML='<div class="bar" id="stat-class"></div>'+statSelect('주차','date',payload.dates.toReversed().map(d=>[d,d]),payload.date);
         mountClassPicker(controls.querySelector('#stat-class'),payload.classes,filter.classId||'',3,scope=>{
           filter.classId=scope;
