@@ -976,7 +976,7 @@ function renderStats(box,embedded=''){
         if(!result.isConnected||request!==latest)return;
         storedProfiles=loaded.profiles||[];
       }
-      if(classes.length&&(!needsProfiles||Array.isArray(storedProfiles)))payload=localStatistics(mode,filter);
+      if(mode!=='absence'&&classes.length&&(!needsProfiles||Array.isArray(storedProfiles)))payload=localStatistics(mode,filter);
       else payload=await api('statistics?'+new URLSearchParams({mode,...filter}));
       if(!result.isConnected||request!==latest)return;
       if(mode==='attendance'){
