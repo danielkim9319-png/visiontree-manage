@@ -992,7 +992,7 @@ function renderStats(box,embedded=''){
       if(mode==='awards'){
         const note=payload.availableVillages.length?'집계 대상 '+payload.availableVillages.join(', ')+' · '+payload.through+' 기준':'선택한 기간의 출결 이력이 없습니다.';
         result.innerHTML='<p>'+safe(note)+'</p><p><strong>'+payload.rows.length+'명</strong></p>'+
-          (payload.rows.length?table(['이름','반',...payload.years.map(y=>y+'년 결석')],payload.rows.map(r=>[r.name,label(r.classId),...r.annual.map(n=>n+'회')])):'<p>해당 학생이 없습니다.</p>');
+          (payload.rows.length?table(['이름','반',...payload.years.map(y=>y+'년 결석')],payload.rows.map(r=>[r.name,label(r.classId),...r.annual.map((n,i)=>n+'회'+(n?' · '+((r.absentDates||[])[i]||[]).join(', '):' · 결석 없음'))])):'<p>해당 학생이 없습니다.</p>');
       }else if(mode==='attendance'){
         controls.innerHTML='<div class="bar" id="stat-class"></div>'+statSelect('주차','date',payload.dates.toReversed().map(d=>[d,d]),payload.date);
         mountClassPicker(controls.querySelector('#stat-class'),payload.classes,filter.classId||'',3,scope=>{
